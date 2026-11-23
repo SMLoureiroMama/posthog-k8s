@@ -148,11 +148,14 @@ spec:
           image: {{ include "posthog.chartImage" (list $ $r.image) | quote }}
           imagePullPolicy: IfNotPresent
           {{- if $ap.enabled }}
-          # An empty secret is a header any pod can send, so refuse to start without one.
+          # An empty secret is a header any pod can send. One with a line break or another character
+          # that cannot go into a header value (a trailing newline in the Secret, typically) would
+          # turn every request to web into a 502. Refuse to start with either.
           command: [/bin/sh, -ec]
           args:
             - |
               [ -n "$AUTH_PROXY_SECRET" ] || { echo "AUTH_PROXY_SECRET is empty" >&2; exit 1; }
+              case "$AUTH_PROXY_SECRET" in *[!!-~]*) echo "AUTH_PROXY_SECRET must be printable ASCII without spaces or line breaks (trailing newline in the Secret?)" >&2; exit 1 ;; esac
               exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
           {{- else }}
           args: [caddy, run, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]

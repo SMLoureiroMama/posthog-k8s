@@ -149,7 +149,7 @@ tests:
           value: [/bin/sh, -ec]
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '\[ -n "\$AUTH_PROXY_SECRET" \] \|\| \{ .* exit 1; \}\nexec caddy run'
+          pattern: '\[ -n "\$AUTH_PROXY_SECRET" \] \|\| \{ .* exit 1; \}\ncase "\$AUTH_PROXY_SECRET" in \*\[!!-~\]\*\) .* exit 1 ;; esac\nexec caddy run'
 
   - it: reads the shared secret from posthog.existingSecret
     set:
