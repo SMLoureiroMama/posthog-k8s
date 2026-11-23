@@ -28,7 +28,8 @@ Only the latest chart release receives fixes.
 
 - Every workload runs non-root with all capabilities dropped and `automountServiceAccountToken: false`.
 - The router's `ingest` listener forwards SDK paths only and strips identity headers; the `app`
-  listener is meant to sit behind an authenticating proxy or a private ingress.
+  listener is meant to sit behind an authenticating proxy or a private ingress. With
+  `networkPolicy.enabled` it accepts `networkPolicy.appIngressFrom` only.
 - Secrets are referenced by name; when the chart generates them it keeps them in one Secret marked
   `helm.sh/resource-policy: keep`. Prefer `existingSecret` / `secrets.keys` in production.
 - PostHog's outbound features (webhooks, destinations, data warehouse sources) let authenticated

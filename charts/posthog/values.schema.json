@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "posthog chart values",
+  "description": "Covers the keys where a typo weakens the trust boundary (authProxy, networkPolicy). Everything else is unconstrained.",
+  "type": "object",
+  "definitions": {
+    "headerName": {
+      "description": "Letters, digits and hyphens. No underscore: Django reads X_Foo and X-Foo as the same header.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9-]*$"
+    },
+    "networkPolicyPeers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "podSelector": {"type": "object"},
+          "namespaceSelector": {"type": "object"},
+          "ipBlock": {"type": "object"}
+        }
+      }
+    }
+  },
+  "properties": {
+    "authProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "userHeader": {"$ref": "#/definitions/headerName"},
+        "emailHeader": {"$ref": "#/definitions/headerName"},
+        "groupsHeader": {"$ref": "#/definitions/headerName"},
+        "sharedSecret": {
+          "description": "Sent as a header value: printable ASCII without spaces.",
+          "type": "string",
+          "pattern": "^[!-~]*$"
+        },
+        "groups": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["organizations", "level"],
+            "properties": {
+              "organizations": {
+                "description": "Organization slugs or IDs; \"*\" is every organization.",
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "level": {
+                "description": "Owner is never granted or removed through the proxy.",
+                "enum": ["member", "admin"]
+              }
+            }
+          }
+        },
+        "passwordLogin": {"type": "boolean"}
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "appIngressFrom": {"$ref": "#/definitions/networkPolicyPeers"},
+        "ingestIngressFrom": {"$ref": "#/definitions/networkPolicyPeers"}
+      }
+    }
+  }
+}

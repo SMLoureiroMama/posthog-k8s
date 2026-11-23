@@ -1,0 +1,15 @@
+# Rendered by `make kubeconform` only: authProxy with the NetworkPolicies it requires.
+authProxy:
+  enabled: true
+  sharedSecret: ci-auth-proxy-shared-secret
+  groups:
+    platform-admins: {organizations: ["*"], level: admin}
+    acme-developers: {organizations: [acme], level: member}
+
+networkPolicy:
+  enabled: true
+  ingestIngressFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+  appIngressFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: oauth2-proxy}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}

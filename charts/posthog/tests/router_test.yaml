@@ -62,3 +62,193 @@ tests:
       - equal:
           path: spec.rules[1].http.paths[0].backend.service.port.name
           value: ingest
+
+  - it: sends no shared-secret header and starts caddy directly while authProxy is off
+    asserts:
+      - notMatchRegex:
+          path: data.Caddyfile
+          pattern: header_up
+        documentSelector:
+          path: kind
+          value: ConfigMap
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: [caddy, run, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+        documentSelector:
+          path: kind
+          value: Deployment
+      - notExists:
+          path: spec.template.spec.containers[0].command
+        documentSelector:
+          path: kind
+          value: Deployment
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTH_PROXY_SECRET
+          any: true
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: removes the authProxy headers and the shared-secret header on the ingest listener
+    set:
+      authProxy.userHeader: X-Auth-Request-User
+      authProxy.emailHeader: X-Auth-Request-Email
+      authProxy.groupsHeader: X-Auth-Request-Groups
+      router.stripHeaders: [x-auth-request-user, X-Extra]
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data.Caddyfile
+          pattern: '(?s)# ingest listener.*request_header -X-Auth-Request-User\n\s+request_header -X-Auth-Request-Email\n\s+request_header -X-Auth-Request-Groups\n\s+request_header -X-Posthog-K8s-Auth-Proxy\n\s+request_header -X-Extra\n\s+handle'
+      - notMatchRegex:
+          path: data.Caddyfile
+          pattern: request_header -x-auth-request-user
+
+  - it: sets the shared-secret header on the app listener's requests to web only
+    set: &authProxyOn
+      authProxy.enabled: true
+      authProxy.sharedSecret: not-in-the-configmap
+      networkPolicy.enabled: true
+      networkPolicy.appIngressFrom:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: oauth2-proxy}}
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data.Caddyfile
+          pattern: '(?s)# app listener.*reverse_proxy RELEASE-NAME-posthog-web:8000 \{\n\s+header_up X-Posthog-K8s-Auth-Proxy "\{env\.AUTH_PROXY_SECRET\}"\n\s+\}.*# ingest listener'
+      - notMatchRegex:
+          path: data.Caddyfile
+          pattern: '(?s)# ingest listener.*header_up'
+      - notMatchRegex:
+          path: data.Caddyfile
+          pattern: '(?s)header_up.*header_up'
+      - notMatchRegex:
+          path: data.Caddyfile
+          pattern: not-in-the-configmap
+
+  - it: hands the shared secret to caddy through the environment and refuses to start without it
+    set: *authProxyOn
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTH_PROXY_SECRET
+            valueFrom:
+              secretKeyRef: {name: RELEASE-NAME-posthog-env, key: AUTH_PROXY_SECRET}
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: [/bin/sh, -ec]
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '\[ -n "\$AUTH_PROXY_SECRET" \] \|\| \{ .* exit 1; \}\nexec caddy run'
+
+  - it: reads the shared secret from posthog.existingSecret
+    set:
+      <<: *authProxyOn
+      authProxy.sharedSecret: ""
+      posthog.existingSecret: my-posthog
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTH_PROXY_SECRET
+            valueFrom:
+              secretKeyRef: {name: my-posthog, key: AUTH_PROXY_SECRET}
+
+  - it: reads the shared secret from a secrets.keys mapping
+    set:
+      <<: *authProxyOn
+      authProxy.sharedSecret: ""
+      secrets.keys.AUTH_PROXY_SECRET: {secret: sso, key: router-secret}
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTH_PROXY_SECRET
+            valueFrom:
+              secretKeyRef: {name: sso, key: router-secret}
+
+  - it: carries a checksum of the authProxy settings so the pods roll when they change
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/auth-proxy"]
+          pattern: ^[0-9a-f]{16}$
+
+  - it: fails with authProxy on and no NetworkPolicy
+    set:
+      authProxy.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "authProxy.enabled needs networkPolicy.enabled and a non-empty networkPolicy.appIngressFrom"
+
+  - it: fails with authProxy on and nobody named in appIngressFrom
+    set:
+      authProxy.enabled: true
+      networkPolicy.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "authProxy.enabled needs networkPolicy.enabled and a non-empty networkPolicy.appIngressFrom"
+
+  - it: fails when two identity headers share a name
+    set:
+      <<: *authProxyOn
+      authProxy.userHeader: X-Forwarded-Email
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be three different headers"
+
+  - it: fails when an identity header is the shared-secret header
+    set:
+      <<: *authProxyOn
+      authProxy.groupsHeader: x-posthog-k8s-auth-proxy
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be three different headers"
+
+  - it: rejects a header name with an underscore
+    set:
+      authProxy.userHeader: X_Forwarded_User
+    asserts:
+      - failedTemplate:
+          errorPattern: "userHeader"
+
+  - it: rejects owner as a group level
+    set:
+      authProxy.groups:
+        platform-admins: {organizations: ["*"], level: owner}
+    asserts:
+      - failedTemplate:
+          errorPattern: "level"
+
+  - it: rejects a group without organizations
+    set:
+      authProxy.groups:
+        platform-admins: {organizations: [], level: admin}
+    asserts:
+      - failedTemplate:
+          errorPattern: "organizations"
+
+  - it: rejects an unknown authProxy key
+    set:
+      authProxy.emailHeaders: X-Forwarded-Email
+    asserts:
+      - failedTemplate:
+          errorPattern: "emailHeaders"

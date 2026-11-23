@@ -184,6 +184,9 @@ networkPolicy:
 
 Backends in the same cluster should send to `http://<release>-router.<ns>.svc:8081` directly.
 
+The app listener accepts `appIngressFrom` and nobody else: the release's own pods reach the ingest
+listener, not the app listener. Leaving `appIngressFrom` empty closes it.
+
 ### Teleport example
 
 Teleport Application Access (teleport-kube-agent) fronting the app listener:
@@ -196,11 +199,13 @@ apps:
     labels: {app: posthog}
     rewrite:
       headers:
-        - "X-Forwarded-User: {{internal.logins}}"
+        - "X-Forwarded-Email: {{external.email}}"
         - "X-Forwarded-Groups: {{internal.kubernetes_groups}}"
 ```
 
-Give roles `app_labels: {app: posthog}`. Until the header login ships, users log in to PostHog
+Give roles `app_labels: {app: posthog}`. `external.email` is the email your SSO connector passes
+on; PostHog accounts are matched by it, so only send an address the identity provider has
+verified. Until the header login ships ([auth-proxy.md](auth-proxy.md)), users log in to PostHog
 with their own account after passing Teleport.
 
 ## 7. Multiple organizations

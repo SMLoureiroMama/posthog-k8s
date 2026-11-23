@@ -1,0 +1,94 @@
+suite: networkpolicy
+templates:
+  - networkpolicy.yaml
+tests:
+  - it: renders nothing while networkPolicy is off
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: keeps the router out of the policy that opens the release's pods to each other
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-posthog-internal
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value:
+            matchLabels:
+              app.kubernetes.io/name: posthog
+              app.kubernetes.io/instance: RELEASE-NAME
+            matchExpressions:
+              - {key: app.kubernetes.io/component, operator: NotIn, values: [router]}
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: posthog
+                      app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: opens only the ingest listener to the release's pods when no peers are named
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-posthog-router
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/component"]
+          value: router
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress]
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: posthog
+                      app.kubernetes.io/instance: RELEASE-NAME
+              ports:
+                - port: 8081
+
+  - it: opens the app listener to appIngressFrom only
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingestIngressFrom:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+      networkPolicy.appIngressFrom:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: oauth2-proxy}}
+          podSelector: {matchLabels: {app: oauth2-proxy}}
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-posthog-router
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: posthog
+                      app.kubernetes.io/instance: RELEASE-NAME
+                - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+              ports:
+                - port: 8081
+            - from:
+                - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: oauth2-proxy}}
+                  podSelector: {matchLabels: {app: oauth2-proxy}}
+              ports:
+                - port: 8080
+
+  - it: rejects a peer that is not a NetworkPolicy peer
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.appIngressFrom:
+        - namespace: oauth2-proxy
+    asserts:
+      - failedTemplate:
+          errorPattern: "appIngressFrom"

@@ -417,8 +417,10 @@ More symptoms and the commands to look at them: [docs/troubleshooting.md](docs/t
 Point your proxy (Teleport Application Access, oauth2-proxy, Pomerium, Authelia, Cloudflare
 Access) at `<release>-router:8080` and expose `<release>-router:8081` publicly for SDK traffic.
 The ingest listener answers 404 for anything that is not an SDK path and strips identity headers
-(`router.stripHeaders`). Header-based automatic login and group → organization mapping is the next
-milestone; see [docs/auth-proxy.md](docs/auth-proxy.md). A complete Teleport example lives in
+(the `authProxy.*Header` names plus `router.stripHeaders`). With `networkPolicy.enabled` the app
+listener accepts `networkPolicy.appIngressFrom` only. Header-based automatic login and group →
+organization mapping is the next milestone: the router side is in place, the login backend is
+not yet; see [docs/auth-proxy.md](docs/auth-proxy.md). A complete Teleport example lives in
 [docs/production.md](docs/production.md#teleport-example).
 
 </details>
