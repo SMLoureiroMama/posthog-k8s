@@ -18,8 +18,10 @@ _RANK = {MEMBER: 1, ADMIN: 2}
 _HEADER_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 # A comma is refused on purpose: a proxy that folds a repeated header into one line joins with it.
 _EMAIL = re.compile(r"^[^@\s,;<>\"]+@[^@\s,;<>\"]+\.[^@\s,;<>\"]+$")
+_SECRET = re.compile(r"^[!-~]+\Z")
 _MAX_EMAIL = 254
 _MAX_NAME = 150
+MIN_SECRET_LENGTH = 32
 
 # PostHog's own ways into an account, as routed at the pinned upstream commit. DRF also serves its
 # routes with a format suffix (/api/login.json). /login is the page itself; below it are the social
@@ -124,6 +126,10 @@ def load_config(env: Mapping[str, str]) -> Config | None:
     secret = env.get("AUTH_PROXY_SECRET") or ""
     if not secret:
         raise ConfigError("AUTH_PROXY_SECRET is empty")
+    if len(secret) < MIN_SECRET_LENGTH:
+        raise ConfigError(f"AUTH_PROXY_SECRET is shorter than {MIN_SECRET_LENGTH} characters")
+    if not _SECRET.match(secret):
+        raise ConfigError("AUTH_PROXY_SECRET must be printable ASCII without spaces or line breaks")
     headers = [
         _header(env, key)
         for key in (
@@ -151,29 +157,54 @@ def load_config(env: Mapping[str, str]) -> Config | None:
     )
 
 
-def _values(headers: Iterable[tuple[bytes, bytes]], name: str) -> list[str]:
-    wanted = name.encode("latin1")
-    return [value.decode("latin1") for key, value in headers if key.lower() == wanted]
+def _normalise(name: str) -> str:
+    """The name as Django sees it: X_Forwarded_Email and X-Forwarded-Email are one META key."""
+    return name.lower().replace("_", "-")
+
+
+def _spellings(headers: Iterable[tuple[bytes, bytes]], name: str) -> list[tuple[str, str]]:
+    """(name as sent, value) of every header that Django would read as `name`."""
+    found = []
+    for key, value in headers:
+        sent = key.decode("latin1").lower()
+        if _normalise(sent) == name:
+            found.append((sent, value.decode("latin1")))
+    return found
+
+
+def without_header(headers: Iterable[tuple[bytes, bytes]], name: str) -> list[tuple[bytes, bytes]]:
+    """The header list without `name` in any spelling."""
+    return [(key, value) for key, value in headers if _normalise(key.decode("latin1")) != name]
+
+
+def meta_key(name: str) -> str:
+    return "HTTP_" + name.upper().replace("-", "_")
 
 
 def read_identity(headers: Iterable[tuple[bytes, bytes]], config: Config) -> Identity | None:
     """The identity the proxy asserts, from the raw header list of the request.
 
     None when the request did not come through the router's app listener or names nobody; the
-    identity headers are then not looked at. Rejected when it came through the listener and an
-    identity header is repeated or malformed.
+    identity headers are then not looked at. Rejected when it came through the listener and one of
+    the headers arrives more than once or under another spelling: the router and the proxy set
+    each exactly once under its exact name, so anything else was sent by the client.
     """
     headers = list(headers)
-    secrets = _values(headers, config.secret_header)
-    if len(secrets) != 1 or not hmac.compare_digest(secrets[0].encode("latin1"), config.secret.encode("latin1")):
+    secrets = _spellings(headers, config.secret_header)
+    exact = [value for sent, value in secrets if sent == config.secret_header]
+    if len(exact) != 1 or not hmac.compare_digest(exact[0].encode("latin1"), config.secret.encode("latin1")):
         return None
+    if len(secrets) > 1:
+        raise Rejected(f"header {config.secret_header} occurs {len(secrets)} times")
 
     found = {}
     for name in (config.user_header, config.email_header, config.groups_header):
-        values = _values(headers, name)
-        if len(values) > 1:
-            raise Rejected(f"header {name} occurs {len(values)} times")
-        found[name] = values[0].strip() if values else ""
+        spellings = _spellings(headers, name)
+        if len(spellings) > 1:
+            raise Rejected(f"header {name} occurs {len(spellings)} times")
+        if spellings and spellings[0][0] != name:
+            raise Rejected(f"header {name} was sent as {spellings[0][0]}")
+        found[name] = spellings[0][1].strip() if spellings else ""
 
     email = found[config.email_header].lower()
     if not email:

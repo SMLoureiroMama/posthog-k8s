@@ -32,7 +32,10 @@ networkPolicy:
 
 - Accounts are matched by email (`authProxy.emailHeader`). **The proxy must only assert verified
   addresses**: whoever can make it send `jane@example.com` is Jane. A new account is created
-  without a password, with the email marked as verified and `authProxy.userHeader` as its name.
+  without a password and with the email marked as verified.
+- `authProxy.userHeader` is never used to identify anyone. It is the display name of an account at
+  the moment the login creates it, nothing else; a proxy that does not set it leaves the name to
+  the part of the email before the `@`.
 - `platform-admins` → admin in every organization; `acme-developers` → member of the organization
   with slug `acme`. Organizations are referenced by slug or ID (names are not unique) and must
   exist; the login never creates one, and a reference that matches nothing is logged and skipped.
@@ -114,19 +117,27 @@ things together make the headers trustworthy:
 3. **The `ingest` listener strips** `authProxy.userHeader`, `emailHeader`, `groupsHeader`, the
    secret header and `router.stripHeaders`, whether `authProxy` is enabled or not.
 
-The login also answers 400 to a request in which an identity header occurs more than once. Django
-joins repeated headers with a comma, so a proxy that appends its header to one the client sent,
-instead of replacing it, would let the client add groups. The login therefore reads the raw header
-list of the request, not Django's merged view. That also keeps `X_Forwarded_Email` apart from
-`X-Forwarded-Email`, which Django folds into one name. An email header that is not exactly one
-address is refused the same way.
+The login also answers 400 to a request in which an identity header or the secret header occurs
+more than once. Django joins repeated headers with a comma, so a proxy that appends its header to
+one the client sent, instead of replacing it, would let the client add groups. The login therefore
+reads the raw header list of the request, not Django's merged view, and matches exact names.
+
+Spellings count as repeats: Django reads `X_Forwarded_Groups` and `X-Forwarded-Groups` as the same
+header, while Caddy and most proxies forward the underscore form untouched next to the one they
+set. A request that carries an identity header or the secret header under any other spelling is
+refused with 400, whether or not the exact header is there too. An email header that is not
+exactly one address is refused the same way.
+
+Once checked, the secret header is taken off the request, so views, logs and error reports of
+PostHog do not see it.
 
 This mirrors how Argo CD (Dex authproxy connector) and Headlamp trust an upstream proxy. Your part
 is the proxy: it has to set all three headers on every request, overwriting what the client sent.
 
 ### The shared secret
 
-`AUTH_PROXY_SECRET` is handled like the chart's other secrets: `authProxy.sharedSecret` inline,
+`AUTH_PROXY_SECRET` (at least 32 characters, printable ASCII without spaces or line breaks) is
+handled like the chart's other secrets: `authProxy.sharedSecret` inline,
 generated and kept across upgrades when empty, read from `posthog.existingSecret` when that is set,
 or mapped with `secrets.keys.AUTH_PROXY_SECRET: {secret: <name>, key: <key>}`. Under Argo CD use
 one of the last two; a generated value would change on every sync. Caddy gets it through its

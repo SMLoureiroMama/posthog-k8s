@@ -37,12 +37,13 @@ class AuthProxyMiddleware:
         self.config = config
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        if not self.config.password_login and core.is_password_path(request.path):
-            return _refuse(request, 403, "password_login_disabled", "Log in through the single sign-on proxy.")
-
         # The raw header list keeps repeated headers apart; request.META has them joined already.
         # Only ASGI requests carry it, and web serves nothing else.
         headers = getattr(request, "scope", {}).get("headers")
+        self._forget_secret(request, headers)
+
+        if not self.config.password_login and core.is_password_path(request.path):
+            return _refuse(request, 403, "password_login_disabled", "Log in through the single sign-on proxy.")
         if headers is None:
             return self.get_response(request)
         try:
@@ -74,6 +75,14 @@ class AuthProxyMiddleware:
                 request._cached_user = user
             request.session[SESSION_KEY] = fingerprint
         return self.get_response(request)
+
+    def _forget_secret(self, request: HttpRequest, headers) -> None:
+        """Take the shared secret off the request, so that views, logs and error reports never see it."""
+        name = self.config.secret_header
+        if headers is not None:
+            request.scope["headers"] = core.without_header(headers, name)
+        request.META.pop(core.meta_key(name), None)
+        request.__dict__.pop("headers", None)
 
     @staticmethod
     def _session_is_current(request: HttpRequest, identity: core.Identity, fingerprint: str) -> bool:

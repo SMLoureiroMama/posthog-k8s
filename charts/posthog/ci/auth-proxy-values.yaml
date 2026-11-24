@@ -2,7 +2,7 @@
 authProxy:
   enabled: true
   image: registry.example.com/posthog-web:kubeconform-only
-  sharedSecret: ci-auth-proxy-shared-secret
+  sharedSecret: ci-only-auth-proxy-shared-secret-0123456789
   groups:
     platform-admins: {organizations: ["*"], level: admin}
     acme-developers: {organizations: [acme], level: member}

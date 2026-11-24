@@ -19,16 +19,18 @@ chart data was generated from.
   acceptance, password reset, email verification, passkey, social and partner login).
 - The router's app listener adds `X-Posthog-K8s-Auth-Proxy` with a shared secret to what it
   forwards to `web`, replacing any copy the client sent, so that `web` can tell proxy traffic from
-  requests other pods send to it directly. `web` ignores the identity headers without it and
-  answers 400 when one of them occurs more than once.
+  requests other pods send to it directly. `web` ignores the identity headers without it, answers
+  400 when one of them or the secret header occurs more than once or under another spelling
+  (`X_Forwarded_Groups`), and takes the secret off the request once it is checked.
 - `AUTH_PROXY_SECRET`: `authProxy.sharedSecret`, generated when empty, read from
   `posthog.existingSecret` or mapped with `secrets.keys.AUTH_PROXY_SECRET`. Caddy reads it from its
-  environment; the router does not start with an empty one.
+  environment; neither the router nor `web` starts with one that is empty, shorter than 32
+  characters, or not printable ASCII.
 - `authProxy.emailHeader`: accounts are matched by email, so the proxy must only assert verified
   addresses.
 - `values.schema.json` for `authProxy` and `networkPolicy`: unknown `authProxy` keys, header names
-  with an underscore, a `level` other than member/admin and peers that are not NetworkPolicy peers
-  are rejected at render time.
+  with an underscore or set to null, an inline `sharedSecret` shorter than 32 characters, a `level`
+  other than member/admin and peers that are not NetworkPolicy peers are rejected at render time.
 
 ### Changed
 - The ingest listener always strips `authProxy.userHeader`, `emailHeader`, `groupsHeader` and the
