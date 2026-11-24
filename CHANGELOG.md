@@ -14,7 +14,9 @@ chart data was generated from.
   without an organization is deactivated and reactivated when access comes back.
 - The login is a Django module (`overlay/`) delivered as an overlay image for `web`
   (`authProxy.image`, built on the pinned PostHog image). The value is empty until an image is
-  published for the chart's appVersion; `authProxy.enabled` then needs your own build.
+  published for the chart's appVersion; `authProxy.enabled` then needs your own build. The image
+  tag names the PostHog commit and a hash of the module, the build refuses a base that is not
+  pinned by digest, and the module is root-owned and read-only in the image.
 - `authProxy.passwordLogin: false` turns off PostHog's own ways in (login, signup, invite
   acceptance, password reset, email verification, passkey, social and partner login).
 - The router's app listener adds `X-Posthog-K8s-Auth-Proxy` with a shared secret to what it
