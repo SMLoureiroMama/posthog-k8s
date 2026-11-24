@@ -7,6 +7,19 @@ chart data was generated from.
 ## [Unreleased]
 
 ### Added
+- Trusted-header login, router side ([docs/auth-proxy.md](docs/auth-proxy.md)). With
+  `authProxy.enabled` the router's app listener adds `X-Posthog-K8s-Auth-Proxy` with a shared secret
+  to what it forwards to `web`, replacing any copy the client sent, so that `web` can tell proxy
+  traffic from requests other pods send to it directly. The login backend (overlay image) is not
+  part of this change: nothing reads the header yet.
+- `AUTH_PROXY_SECRET`: `authProxy.sharedSecret`, generated when empty, read from
+  `posthog.existingSecret` or mapped with `secrets.keys.AUTH_PROXY_SECRET`. Caddy reads it from its
+  environment; the router does not start with an empty one.
+- `authProxy.emailHeader` (accounts are matched by email), `authProxy.passwordLogin` (read by the
+  overlay image). `authProxy.groups` references organizations by slug or ID.
+- `values.schema.json` for `authProxy` and `networkPolicy`: unknown `authProxy` keys, header names
+  with an underscore, a `level` other than member/admin and peers that are not NetworkPolicy peers
+  are rejected at render time.
 - `serviceAccount.{create,name,annotations,labels}`: the ServiceAccount every pod runs as (the
   namespace's `default` until now, still the default). `services.<name>.serviceAccountName`
   overrides it per upstream service.
@@ -24,9 +37,25 @@ chart data was generated from.
   sets `AWS_ROLE_ARN` / `AWS_WEB_IDENTITY_TOKEN_FILE` (and `AWS_ENDPOINT_URL_STS`), for any S3 store
   whose STS supports `AssumeRoleWithWebIdentity`, without a platform webhook.
 
+### Changed
+- The ingest listener always strips `authProxy.userHeader`, `emailHeader`, `groupsHeader` and the
+  shared-secret header; `router.stripHeaders` lists additional headers.
+- `networkPolicy.enabled`: the router is no longer covered by the policy that lets the release's
+  pods reach each other. Its ingest port accepts the release's pods and `ingestIngressFrom`, its
+  app port `appIngressFrom` only.
+- `authProxy.enabled: true` fails to render without `networkPolicy.enabled: true` and a non-empty
+  `networkPolicy.appIngressFrom`, or when two of its headers share a name.
+- docs/production.md: the Teleport example sends `X-Forwarded-Email` from an email trait instead of
+  `X-Forwarded-User` from `internal.logins`.
+
 ### Upgrade notes
+- With `networkPolicy.enabled`, pods of the release can no longer open the router's app listener.
+  If one of yours does (a `siteUrl` that points at the router Service, for example), name it in
+  `networkPolicy.appIngressFrom`.
+- The router pods restart once (new pod annotation).
 - Defaults render the same manifests as 0.2.1: no ServiceAccount is created and no pod sets
   `serviceAccountName`. `automountServiceAccountToken` stays `false` everywhere.
+
 
 ## [0.2.1] - 2026-11-04
 

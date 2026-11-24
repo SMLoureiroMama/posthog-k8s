@@ -163,7 +163,7 @@ usage: include "posthog.secretRef" (list $ "DATABASE_URL") -> "name/key"
 {{- include "posthog.secretRef" (list $ "OBJECT_STORAGE_ACCESS_KEY_ID") -}}
 {{- else if and (eq $key "SESSION_RECORDING_SECRET_ACCESS_KEY") (not $sr.secretAccessKey) -}}
 {{- include "posthog.secretRef" (list $ "OBJECT_STORAGE_SECRET_ACCESS_KEY") -}}
-{{- else if and (has $key (list "SECRET_KEY" "ENCRYPTION_SALT_KEYS" "BROWSERLESS_TOKEN" "INTERNAL_API_SECRET" "INTERNAL_REQUEST_TOKEN" "RECORDING_API_JWT_SECRET" "AI_GATEWAY_API_KEY")) $.Values.posthog.existingSecret -}}
+{{- else if and (has $key (list "SECRET_KEY" "ENCRYPTION_SALT_KEYS" "BROWSERLESS_TOKEN" "INTERNAL_API_SECRET" "INTERNAL_REQUEST_TOKEN" "RECORDING_API_JWT_SECRET" "AI_GATEWAY_API_KEY" "AUTH_PROXY_SECRET")) $.Values.posthog.existingSecret -}}
 {{- printf "%s/%s" $.Values.posthog.existingSecret $key -}}
 {{- else -}}
 {{- printf "%s/%s" (include "posthog.envSecretName" $) $key -}}
@@ -523,4 +523,43 @@ args: root, upstream (no trailing slash)
 		}
 	}
 }
+{{- end -}}
+
+{{/* Header the router's app listener sets on requests to web; web trusts identity headers only with it. */}}
+{{- define "posthog.authProxySecretHeader" -}}
+X-Posthog-K8s-Auth-Proxy
+{{- end -}}
+
+{{/*
+Headers the ingest listener removes: the authProxy identity headers, the shared-secret header and
+router.stripHeaders, as a JSON list without duplicates (header names are case-insensitive).
+*/}}
+{{- define "posthog.routerStripHeaders" -}}
+{{- $ap := .Values.authProxy -}}
+{{- $seen := dict -}}
+{{- $out := list -}}
+{{- range concat (list $ap.userHeader $ap.emailHeader $ap.groupsHeader (include "posthog.authProxySecretHeader" .)) .Values.router.stripHeaders -}}
+{{- if and . (not (hasKey $seen (lower .))) -}}
+{{- $_ := set $seen (lower .) true -}}
+{{- $out = append $out . -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
+authProxy trusts whoever reaches the router's app listener, so it only renders with a NetworkPolicy
+that names those peers.
+*/}}
+{{- define "posthog.authProxyValidate" -}}
+{{- $ap := .Values.authProxy -}}
+{{- if $ap.enabled -}}
+{{- if not (and .Values.networkPolicy.enabled .Values.networkPolicy.appIngressFrom) -}}
+{{- fail "authProxy.enabled needs networkPolicy.enabled and a non-empty networkPolicy.appIngressFrom: identity headers are trusted from every peer that reaches the router's app listener" -}}
+{{- end -}}
+{{- $names := list (lower $ap.userHeader) (lower $ap.emailHeader) (lower $ap.groupsHeader) (lower (include "posthog.authProxySecretHeader" .)) -}}
+{{- if ne (len ($names | uniq)) 4 -}}
+{{- fail (printf "authProxy.userHeader, emailHeader and groupsHeader must be three different headers, none of them %s" (include "posthog.authProxySecretHeader" .)) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
