@@ -65,8 +65,8 @@ e2e-install: ## Install into the current kube context (kind in CI), printing pod
 e2e-export-seed: ## Export a schema seed (pg_dump + ClickHouse backup) from the installed release
 	NAMESPACE=$(NAMESPACE) RELEASE=$(RELEASE) e2e/export-seed.sh .seed
 
-e2e-test: ## Smoke tests against the installed release
-	python3 e2e/smoke.py --namespace $(NAMESPACE) --release $(RELEASE)
+e2e-test: ## Smoke tests against the installed release (SMOKE_ARGS=--auth-proxy adds the login checks)
+	python3 e2e/smoke.py --namespace $(NAMESPACE) --release $(RELEASE) $(SMOKE_ARGS)
 
 e2e-clean: ## Remove the release
 	helm uninstall $(RELEASE) -n $(NAMESPACE) || true
