@@ -52,9 +52,12 @@ kubeconform: ## Validate rendered manifests against the Kubernetes schemas
 	helm template $(RELEASE) $(CHART) | kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 	@for f in $(CHART)/ci/*.yaml; do echo "== $$f"; helm template $(RELEASE) $(CHART) -f $$f | kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'; done
 
-caddy-validate: ## Render the router Caddyfile and validate it with the caddy binary (needs docker)
-	helm template $(RELEASE) $(CHART) -s templates/router.yaml | python3 -c 'import sys,yaml; [print(d["data"]["Caddyfile"]) for d in yaml.safe_load_all(sys.stdin) if d and d["kind"]=="ConfigMap"]' > /tmp/Caddyfile
-	docker run --rm -v /tmp/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+caddy-validate: ## Render the router Caddyfile (default values and with authProxy) and validate it with the caddy binary (needs docker)
+	@for f in "" "-f $(CHART)/ci/auth-proxy-values.yaml"; do echo "== router Caddyfile $$f"; \
+	  helm template $(RELEASE) $(CHART) $$f -s templates/router.yaml | python3 -c 'import sys,yaml; [print(d["data"]["Caddyfile"]) for d in yaml.safe_load_all(sys.stdin) if d and d["kind"]=="ConfigMap"]' > /tmp/Caddyfile || exit 1; \
+	  [ -s /tmp/Caddyfile ] || { echo "no Caddyfile rendered"; exit 1; }; \
+	  docker run --rm -v /tmp/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || exit 1; \
+	done
 
 docs: ## Regenerate charts/posthog/README.md values table
 	helm-docs --chart-search-root $(CHART) --template-files README.md.gotmpl

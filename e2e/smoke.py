@@ -179,6 +179,21 @@ def check_auth_proxy(owner: Client, owner_email: str, namespace: str, release: s
     assert members().get(member_email) == MEMBER, "a repeated groups header changed the level"
     log("auth proxy: a repeated identity header is refused with 400")
 
+    # so is another spelling of one: Django reads X_Forwarded_Groups as X-Forwarded-Groups
+    proxy_headers = list(identity(member_email, "e2e-members").items())
+    for extra in (
+        ("X_Forwarded_Groups", "e2e-admins"),
+        ("X_Forwarded_Email", f"other-{run}@example.com"),
+        ("X_Posthog_K8s_Auth_Proxy", "anything"),
+    ):
+        status = raw_status(APP, "/api/users/@me/", [*proxy_headers, extra])
+        assert status == 400, f"{extra[0]} next to the proxy's headers: expected 400, got {status}"
+    without_groups = [(k, v) for k, v in proxy_headers if k != "X-Forwarded-Groups"]
+    status = raw_status(APP, "/api/users/@me/", [*without_groups, ("X_Forwarded_Groups", "e2e-admins")])
+    assert status == 400, f"X_Forwarded_Groups in place of the groups header: expected 400, got {status}"
+    assert members().get(member_email) == MEMBER, "an underscore spelling of the groups header changed the level"
+    log("auth proxy: an identity or secret header under another spelling is refused with 400")
+
     # the ingest listener strips the headers. /robots.txt is a web path both listeners forward and
     # one the login sees: the same request on the app listener does create the user.
     ingest_email, control_email = f"ingest-{run}@example.com", f"control-{run}@example.com"

@@ -31,7 +31,7 @@ router:
 authProxy:
   enabled: true
   image: posthog-k8s/posthog-web:e2e
-  sharedSecret: ci-auth-proxy-shared-secret
+  sharedSecret: ci-only-auth-proxy-shared-secret-0123456789
   groups:
     e2e-admins: {organizations: ["*"], level: admin}
     e2e-members: {organizations: ["*"], level: member}

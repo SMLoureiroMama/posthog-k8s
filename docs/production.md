@@ -199,13 +199,15 @@ apps:
     labels: {app: posthog}
     rewrite:
       headers:
+        - "X-Forwarded-User: {{internal.logins}}"
         - "X-Forwarded-Email: {{external.email}}"
         - "X-Forwarded-Groups: {{internal.kubernetes_groups}}"
 ```
 
 Give roles `app_labels: {app: posthog}`. `external.email` is the email your SSO connector passes
 on; PostHog accounts are matched by it, so only send an address the identity provider has
-verified. Without `authProxy.enabled`, users log in to PostHog with their own account after
+verified. `X-Forwarded-User` is only the display name of a new account, but set all three: a header
+the proxy leaves out is one the client can send. Without `authProxy.enabled`, users log in to PostHog with their own account after
 passing Teleport.
 
 ### oauth2-proxy example
