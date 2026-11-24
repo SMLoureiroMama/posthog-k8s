@@ -2,6 +2,7 @@
 {{- $selector := include "posthog.selectorLabels" (list . "router") | fromYaml }}
 ---
 # Default deny ingress for every pod of this release; pods of the release may talk to each other.
+# The router is left out: the policy below decides who reaches its listeners.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -14,6 +15,8 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ include "posthog.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
+    matchExpressions:
+      - {key: app.kubernetes.io/component, operator: NotIn, values: [router]}
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -22,8 +25,9 @@ spec:
               app.kubernetes.io/name: {{ include "posthog.name" . }}
               app.kubernetes.io/instance: {{ .Release.Name }}
 ---
-# The router's ingest listener is reachable from the configured peers (ingress controller, tunnel);
-# the app listener only from the identity-aware proxy. Empty lists mean nobody outside the release.
+# The router's ingest listener is reachable from the release's pods and the configured peers (ingress
+# controller, tunnel); the app listener only from appIngressFrom (the identity-aware proxy), which
+# does not include the release's own pods. An empty appIngressFrom closes the app listener.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -37,12 +41,16 @@ spec:
       {{- toYaml $selector | nindent 6 }}
   policyTypes: [Ingress]
   ingress:
-    {{- with .Values.networkPolicy.ingestIngressFrom }}
     - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "posthog.name" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- with .Values.networkPolicy.ingestIngressFrom }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       ports:
-        - port: {{ $.Values.router.ports.ingest }}
-    {{- end }}
+        - port: {{ .Values.router.ports.ingest }}
     {{- with .Values.networkPolicy.appIngressFrom }}
     - from:
         {{- toYaml . | nindent 8 }}

@@ -2,7 +2,15 @@
 Router: Caddy with two listeners generated from upstream's Caddyfile routes.
   app    (:8080) everything, meant to sit behind an identity-aware proxy or private ingress
   ingest (:8081) only the paths SDKs need; identity headers are stripped
+
+With authProxy.enabled the app listener marks what it forwards to web with a shared secret
+(AUTH_PROXY_SECRET). web is reachable from every pod of the release, so the identity headers alone
+would not tell it that a request came through the proxy.
 */ -}}
+{{- include "posthog.authProxyValidate" . -}}
+{{- $ap := .Values.authProxy -}}
+{{- $secretHeader := include "posthog.authProxySecretHeader" . -}}
+{{- $strip := include "posthog.routerStripHeaders" . | fromJsonArray -}}
 {{- $up := include "posthog.upstream" . | fromYaml -}}
 {{- $root := . -}}
 {{- $r := .Values.router -}}
@@ -63,7 +71,13 @@ data:
         }
 {{ include "posthog.routerHandles" (list . $up.routes) | indent 4 }}
         handle {
+{{- if $ap.enabled }}
+            reverse_proxy {{ $web }} {
+                header_up {{ $secretHeader }} "{env.AUTH_PROXY_SECRET}"
+            }
+{{- else }}
             reverse_proxy {{ $web }}
+{{- end }}
         }
     }
 
@@ -72,7 +86,7 @@ data:
         request_body {
             max_size 64MB
         }
-{{- range $r.stripHeaders }}
+{{- range $strip }}
         request_header -{{ . }}
 {{- end }}
         handle /_router/healthz {
@@ -113,6 +127,7 @@ spec:
       annotations:
         checksum/caddyfile: {{ include "posthog.routerHandles" (list . $up.routes) | sha256sum | trunc 16 }}
         checksum/router-values: {{ toYaml $r | sha256sum | trunc 16 }}
+        checksum/auth-proxy: {{ toJson (list $ap.enabled $strip) | sha256sum | trunc 16 }}
     spec:
       {{- include "posthog.imagePullSecrets" . | nindent 6 }}
       automountServiceAccountToken: false
@@ -132,12 +147,30 @@ spec:
         - name: caddy
           image: {{ include "posthog.chartImage" (list $ $r.image) | quote }}
           imagePullPolicy: IfNotPresent
+          {{- if $ap.enabled }}
+          # An empty secret is a header any pod can send. One with a line break or another character
+          # that cannot go into a header value (a trailing newline in the Secret, typically) would
+          # turn every request to web into a 502. Refuse to start with either.
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              [ -n "$AUTH_PROXY_SECRET" ] || { echo "AUTH_PROXY_SECRET is empty" >&2; exit 1; }
+              case "$AUTH_PROXY_SECRET" in *[!!-~]*) echo "AUTH_PROXY_SECRET must be printable ASCII without spaces or line breaks (trailing newline in the Secret?)" >&2; exit 1 ;; esac
+              exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+          {{- else }}
           args: [caddy, run, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+          {{- end }}
           env:
             - name: XDG_CONFIG_HOME
               value: /tmp/config
             - name: XDG_DATA_HOME
               value: /tmp/data
+            {{- if $ap.enabled }}
+            {{- $secret := splitn "/" 2 (include "posthog.secretRef" (list . "AUTH_PROXY_SECRET")) }}
+            - name: AUTH_PROXY_SECRET
+              valueFrom:
+                secretKeyRef: {name: {{ $secret._0 }}, key: {{ $secret._1 }}}
+            {{- end }}
           ports:
             - name: app
               containerPort: {{ $r.ports.app }}
