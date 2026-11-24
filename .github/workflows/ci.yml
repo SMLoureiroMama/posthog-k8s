@@ -36,6 +36,8 @@ jobs:
       - name: authProxy.image is the overlay of the locked upstream commit
         run: make overlay-check
       - name: Generated chart data is in sync with tools/rules.yaml
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make sync-check
       - name: helm lint
         run: make lint
