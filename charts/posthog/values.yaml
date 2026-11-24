@@ -295,7 +295,7 @@ authProxy:
   # `networkPolicy.enabled` and a non-empty `networkPolicy.appIngressFrom`; rendering fails otherwise.
   enabled: false
   # -- Overlay image for `web`: PostHog's image at the chart's appVersion plus the login module
-  # (overlay/). Written by the release process as repository:tag@sha256:...; empty while no image is
+  # (overlay/). Written by the release process as repository:<make overlay-tag>@sha256:...; empty while no image is
   # published for this appVersion, and rendering then fails with `enabled: true`. Set it to your
   # own build (`make overlay-build`) to use one; a tag without a digest follows the tag.
   image: ""

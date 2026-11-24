@@ -79,9 +79,11 @@ PostHog's self-hosted edition has no trusted-header or OIDC login backend; SAML 
 Cloud-only feature. The login is a small Django module (`overlay/posthog_k8s_authproxy`): a
 middleware right after PostHog's `AuthenticationMiddleware` and an authentication backend that
 names its sessions. It is delivered as an overlay image
-`ghcr.io/enricofranke/posthog-k8s/posthog-web:<upstream-sha>`, built `FROM posthog/posthog@<digest>`
+`ghcr.io/enricofranke/posthog-k8s/posthog-web:<upstream-sha>-<source-hash>`, built `FROM posthog/posthog@<digest>`
 and pinned by digest like the other images. Only `web` runs it, and only with
-`authProxy.enabled`.
+`authProxy.enabled`. The tag names both inputs: the PostHog commit and a hash of
+`overlay/Dockerfile` and the module (`make overlay-tag`). CI fails when `authProxy.image` carries
+another tag, so a pinned image cannot outlive an upstream bump or a change to the login.
 
 The image adds the module and appends one hook to `posthog/settings/__init__.py`, which does
 nothing unless `AUTH_PROXY_ENABLED` is set. Nothing of PostHog is replaced, and nothing under
@@ -92,8 +94,11 @@ The image follows the chart's `appVersion`. If you override the PostHog image
 (`images.overrides.posthog`), build the overlay on that image and set `authProxy.image`:
 
 ```
-docker build --build-arg POSTHOG_IMAGE=<your posthog image> -t <registry>/posthog-web:<tag> overlay
+docker build --build-arg POSTHOG_IMAGE=<repository>@sha256:<digest> -t <registry>/posthog-web:<tag> overlay
 ```
+
+The build refuses a base that is not pinned by digest; `--build-arg ALLOW_UNPINNED_BASE=true`
+overrides that.
 
 `web` does not start when the login is enabled and its configuration is broken (empty secret,
 unknown level, a PostHog without the middleware the login is anchored to), so a rollout stops

@@ -44,7 +44,8 @@ GitHub and the container registries (digests) the first time; inputs are cached 
    `tools/rules.yaml` about the new thing (and add a test in `tools/tests/`).
 4. Bump `version` and `appVersion` in `charts/posthog/Chart.yaml`, add a `CHANGELOG.md` entry.
 5. Empty `authProxy.image` in `charts/posthog/values.yaml`: the published overlay belongs to the
-   previous upstream commit, and `make overlay-check` fails until it is gone or rebuilt. If the
+   previous upstream commit, and `make overlay-check` fails until it is gone or rebuilt. The same
+   goes for a PR that changes `overlay/Dockerfile` or the module: the tag carries their hash. If the
    overlay build fails on the new image, upstream moved something the login is anchored to
    (`overlay/Dockerfile` names what).
 6. Open a PR. CI runs lint, unit tests and the full end-to-end install on kind.
@@ -58,8 +59,9 @@ GitHub and the container registries (digests) the first time; inputs are cached 
 ## Releasing (maintainers)
 
 The overlay image comes first: build it on the pinned PostHog image, push it as
-`posthog-web:<upstream commit>`, sign it, and write `repository:tag@sha256:<digest>` into
-`authProxy.image` (`make overlay-check` verifies the tag). Then:
+`posthog-web:$(make overlay-tag)`, sign it, and write `repository:tag@sha256:<digest>` into
+`authProxy.image` (`make overlay-check` verifies the tag: upstream commit plus a hash of
+`overlay/Dockerfile` and the module). Then:
 
 Tag `vX.Y.Z` matching `Chart.yaml`. The release workflow packages the chart, pushes it to
 `oci://ghcr.io/enricofranke/charts/posthog`, signs it with cosign (keyless) and creates a GitHub
