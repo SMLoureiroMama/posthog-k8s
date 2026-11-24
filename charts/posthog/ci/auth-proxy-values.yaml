@@ -1,6 +1,7 @@
 # Rendered by `make kubeconform` only: authProxy with the NetworkPolicies it requires.
 authProxy:
   enabled: true
+  image: registry.example.com/posthog-web:kubeconform-only
   sharedSecret: ci-auth-proxy-shared-secret
   groups:
     platform-admins: {organizations: ["*"], level: admin}

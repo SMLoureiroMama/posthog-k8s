@@ -3,7 +3,11 @@ UPSTREAM   := $(shell awk '/^ref:/ {print $$2}' $(CHART)/upstream.lock 2>/dev/nu
 NAMESPACE  ?= posthog
 RELEASE    ?= posthog
 
-.PHONY: help sync sync-check test-tools lint unittest kubeconform template docs e2e-install e2e-test e2e-clean
+# PostHog's image as pinned in upstream.yaml (repository@digest) and the name the overlay is built as.
+POSTHOG_IMAGE = $(shell cd tools && uv run python -c "import yaml; i = yaml.safe_load(open('../$(CHART)/upstream.yaml'))['images']['posthog']; print(i['repository'] + '@' + i['digest'])")
+OVERLAY_IMAGE ?= posthog-k8s/posthog-web:dev
+
+.PHONY: help sync sync-check test-tools test-overlay overlay-base overlay-build overlay-check lint unittest kubeconform template docs e2e-install e2e-test e2e-clean
 
 help: ## Show targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -16,6 +20,23 @@ sync-check: ## Fail when upstream.yaml is not what rules.yaml + the locked upstr
 
 test-tools: ## Generator unit tests
 	cd tools && uv run pytest -q
+
+test-overlay: ## Unit tests of the trusted-header login module (overlay/)
+	cd tools && uv run pytest -q ../overlay/tests
+
+overlay-base: ## Print the PostHog image the overlay is built on
+	@echo $(POSTHOG_IMAGE)
+
+overlay-build: ## Build the web overlay image on the pinned PostHog image (OVERLAY_IMAGE=name:tag)
+	docker build --build-arg POSTHOG_IMAGE=$(POSTHOG_IMAGE) -t $(OVERLAY_IMAGE) overlay
+
+overlay-check: ## Fail when authProxy.image is set but is not the pinned overlay of the locked upstream commit
+	@img=$$(awk '/^authProxy:/ {f=1} f && /^  image:/ {print $$2; exit}' $(CHART)/values.yaml | tr -d '"'); \
+	if [ -z "$$img" ]; then echo "overlay-check: authProxy.image is empty, no overlay is published for this chart yet"; exit 0; fi; \
+	case "$$img" in \
+	  *":$(UPSTREAM)@sha256:"*) echo "overlay-check ok" ;; \
+	  *) echo "authProxy.image ($$img) is not repository:$(UPSTREAM)@sha256:<digest>: rebuild the overlay for this upstream commit and write its digest"; exit 1 ;; \
+	esac
 
 lint: ## helm lint
 	helm lint $(CHART)
