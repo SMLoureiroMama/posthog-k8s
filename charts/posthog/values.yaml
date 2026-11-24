@@ -299,15 +299,17 @@ authProxy:
   # published for this appVersion, and rendering then fails with `enabled: true`. Set it to your
   # own build (`make overlay-build`) to use one; a tag without a digest follows the tag.
   image: ""
-  # -- Header with the proxy's name for the user (username or subject).
+  # -- Header with the proxy's name for the user. Only the display name of a newly created account;
+  # it never selects or changes one.
   userHeader: X-Forwarded-User
   # -- Header with the email address; accounts are matched by it. The proxy must only assert
   # verified addresses.
   emailHeader: X-Forwarded-Email
   # -- Header with the comma-separated groups of the user.
   groupsHeader: X-Forwarded-Groups
-  # -- Shared secret between the router and web (AUTH_PROXY_SECRET); generated when empty. Under
-  # Argo CD put it in posthog.existingSecret or map it with secrets.keys.AUTH_PROXY_SECRET.
+  # -- Shared secret between the router and web (AUTH_PROXY_SECRET), at least 32 characters;
+  # generated when empty. Under Argo CD put it in posthog.existingSecret or map it with
+  # secrets.keys.AUTH_PROXY_SECRET.
   sharedSecret: ""
   # -- Group -> organization memberships. Organizations are referenced by slug or ID and must
   # exist; `"*"` is every organization. `level` is member or admin.

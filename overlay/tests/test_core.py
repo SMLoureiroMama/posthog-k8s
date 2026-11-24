@@ -3,7 +3,7 @@ import json
 import pytest
 from posthog_k8s_authproxy import core
 
-SECRET = "s3cret-shared-between-router-and-web"
+SECRET = "s3cret-shared-between-the-router-and-web"
 ENV = {
     "AUTH_PROXY_ENABLED": "true",
     "AUTH_PROXY_SECRET": SECRET,
@@ -51,6 +51,16 @@ class TestLoadConfig:
     def test_empty_secret_is_an_error(self):
         with pytest.raises(core.ConfigError, match="AUTH_PROXY_SECRET is empty"):
             config(AUTH_PROXY_SECRET="")
+
+    def test_short_secret_is_an_error(self):
+        with pytest.raises(core.ConfigError, match="shorter than 32 characters"):
+            config(AUTH_PROXY_SECRET="x" * 31)
+        assert config(AUTH_PROXY_SECRET="x" * 32).secret == "x" * 32
+
+    @pytest.mark.parametrize("secret", ["x" * 40 + "\n", "x" * 20 + " " + "x" * 20, "x" * 40 + "\u00fc"])
+    def test_secret_that_cannot_be_a_header_value_is_an_error(self, secret):
+        with pytest.raises(core.ConfigError, match="printable ASCII"):
+            config(AUTH_PROXY_SECRET=secret)
 
     @pytest.mark.parametrize("name", ["", "X_Forwarded_Email", "X Forwarded Email", "-x"])
     def test_bad_header_name_is_an_error(self, name):
@@ -122,9 +132,44 @@ class TestReadIdentity:
         with pytest.raises(core.Rejected, match="not one email address"):
             core.read_identity(headers(("X-Forwarded-Email", email)), config())
 
-    def test_underscore_spelling_is_another_header(self):
+    @pytest.mark.parametrize(
+        "name", ["X_Forwarded_Groups", "x_forwarded-groups", "X_Forwarded_Email", "X_Forwarded_User"]
+    )
+    def test_rejects_another_spelling_next_to_the_exact_header(self, name):
+        raw = headers(
+            ("X-Forwarded-Email", "jane@example.com"),
+            ("X-Forwarded-User", "jane"),
+            ("X-Forwarded-Groups", "acme-developers"),
+            (name, "platform-admins"),
+        )
+        with pytest.raises(core.Rejected, match="occurs 2 times"):
+            core.read_identity(raw, config())
+
+    def test_rejects_another_spelling_on_its_own(self):
         raw = headers(("X-Forwarded-Email", "jane@example.com"), ("X_Forwarded_Groups", "platform-admins"))
-        assert core.read_identity(raw, config()).groups == ()
+        with pytest.raises(core.Rejected, match="was sent as x_forwarded_groups"):
+            core.read_identity(raw, config())
+
+    def test_rejects_another_spelling_of_the_secret_header_next_to_the_real_one(self):
+        raw = headers(("X-Forwarded-Email", "jane@example.com"), ("X_Posthog_K8s_Auth_Proxy", "anything"))
+        with pytest.raises(core.Rejected, match="x-posthog-k8s-auth-proxy occurs 2 times"):
+            core.read_identity(raw, config())
+
+    def test_the_secret_under_another_spelling_is_not_the_secret(self):
+        raw = headers(("X-Forwarded-Email", "jane@example.com"), ("X_Posthog_K8s_Auth_Proxy", SECRET), secret=None)
+        assert core.read_identity(raw, config()) is None
+
+
+class TestForgettingTheSecret:
+    def test_without_header_drops_every_spelling_and_nothing_else(self):
+        raw = headers(("X-Forwarded-Email", "jane@example.com"), ("X_Posthog_K8s_Auth_Proxy", "x"))
+        assert core.without_header(raw, "x-posthog-k8s-auth-proxy") == [
+            (b"host", b"posthog.example.com"),
+            (b"x-forwarded-email", b"jane@example.com"),
+        ]
+
+    def test_meta_key_is_djangos_name_for_the_header(self):
+        assert core.meta_key("x-posthog-k8s-auth-proxy") == "HTTP_X_POSTHOG_K8S_AUTH_PROXY"
 
 
 class TestFingerprint:

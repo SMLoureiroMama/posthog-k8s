@@ -27,6 +27,7 @@
     "authProxy": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["enabled", "userHeader", "emailHeader", "groupsHeader"],
       "properties": {
         "enabled": {"type": "boolean"},
         "image": {
@@ -38,9 +39,9 @@
         "emailHeader": {"$ref": "#/definitions/headerName"},
         "groupsHeader": {"$ref": "#/definitions/headerName"},
         "sharedSecret": {
-          "description": "Sent as a header value: printable ASCII without spaces.",
+          "description": "Sent as a header value: empty (generated) or at least 32 printable ASCII characters without spaces.",
           "type": "string",
-          "pattern": "^[!-~]*$"
+          "pattern": "^$|^[!-~]{32,}$"
         },
         "groups": {
           "type": "object",
